@@ -1,115 +1,81 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
-	"net"
+	"errors"
+	"github.com/erply/api-go-wrapper/pkg/api/addresses"
+	"github.com/erply/api-go-wrapper/pkg/api/auth"
+	"github.com/erply/api-go-wrapper/pkg/api/company"
+	"github.com/erply/api-go-wrapper/pkg/api/customers"
+	"github.com/erply/api-go-wrapper/pkg/api/pos"
+	"github.com/erply/api-go-wrapper/pkg/api/products"
+	"github.com/erply/api-go-wrapper/pkg/api/sales"
+	"github.com/erply/api-go-wrapper/pkg/api/servicediscovery"
+	"github.com/erply/api-go-wrapper/pkg/api/warehouse"
+	"github.com/erply/api-go-wrapper/pkg/common"
 	"net/http"
-	"net/url"
-	"time"
 )
 
-//IClient ...
-type erplyClient struct {
-	sessionKey string
-	clientCode string
-	partnerKey string
-	secret     string
-	url        string
-	httpClient *http.Client
-}
+type Client struct {
+	commonClient *common.Client
 
-//VerifyUser will give you session key
-func VerifyUser(username string, password string, clientCode string, client *http.Client) (string, error) {
-	requestUrl := fmt.Sprintf(baseURL, clientCode)
-	params := url.Values{}
-	params.Add("username", username)
-	params.Add("clientCode", clientCode)
-	params.Add("password", password)
-	params.Add("request", "verifyUser")
+	//Address requests
+	AddressProvider addresses.Manager
+	//Token requests
+	AuthProvider auth.Provider
+	//Company and Conf parameter requests
+	CompanyManager company.Manager
+	//Customers and suppliers requests
+	CustomerManager customers.Manager
+	//POS related requests
+	PosManager pos.Manager
+	//Products related requests
+	ProductManager products.Manager
 
-	req, err := http.NewRequest("POST", requestUrl, nil)
-	if err != nil {
-		return "", erplyerr("failed to build HTTP request", err)
-	}
+	//SalesDocuments, Payments, Projects, ShoppingCart, VatRates
+	SalesManager sales.Manager
 
-	req.URL.RawQuery = params.Encode()
-	req.Header.Add("Accept", "application/json")
-	resp, err := client.Do(req)
+	//Warehouse requests
+	WarehouseManager warehouse.Manager
 
-	if err != nil {
-		return "", erplyerr("failed to build VerifyUser request", err)
-	}
-
-	res := &VerifyUserResponse{}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", erplyerr("failed to decode VerifyUserResponse", err)
-	}
-	if len(res.Records) < 1 {
-		return "", erplyerr("VerifyUser: no records in response", nil)
-	}
-	return res.Records[0].SessionKey, nil
+	//Service Discovery
+	ServiceDiscoverer servicediscovery.ServiceDiscoverer
 }
 
 // NewClient Takes three params:
 // sessionKey string obtained from credentials or jwt
 // clientCode erply customer identification number
 // and a custom http Client if needs to be overwritten. if nil will use default http client provided by the SDK
-func NewClient(sessionKey string, clientCode string, customCli *http.Client) IClient {
 
-	tr := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 10 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout: 10 * time.Second,
+func NewClient(sessionKey, clientCode string, customCli *http.Client) (*Client, error) {
 
-		ExpectContinueTimeout: 4 * time.Second,
-		ResponseHeaderTimeout: 3 * time.Second,
-
-		MaxIdleConns:    MaxIdleConns,
-		MaxConnsPerHost: MaxConnsPerHost,
+	if sessionKey == "" || clientCode == "" {
+		return nil, errors.New("sessionKey and clientCode are required")
 	}
 
-	cli := erplyClient{
-		sessionKey: sessionKey,
-		clientCode: clientCode,
-		url:        fmt.Sprintf(baseURL, clientCode),
-		httpClient: &http.Client{
-			Transport: tr,
-			Timeout:   5 * time.Second,
-		},
-	}
-	if customCli != nil {
-		cli.httpClient = customCli
-	}
-	return &cli
+	//declare short getters
+	var (
+		//sessionKey
+		s = sessionKey
+		//clientCode
+		c = clientCode
+		h = customCli
+	)
+	comCli := common.NewClient(s, c, "", h)
+
+	return newErplyClient(comCli), nil
 }
 
-func NewClientV2(partnerKey string, secret string, clientCode string) IClient {
-	tr := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 10 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout: 10 * time.Second,
-
-		ExpectContinueTimeout: 4 * time.Second,
-		ResponseHeaderTimeout: 3 * time.Second,
-
-		MaxIdleConns:    MaxIdleConns,
-		MaxConnsPerHost: MaxConnsPerHost,
+func newErplyClient(c *common.Client) *Client {
+	return &Client{
+		commonClient:      c,
+		AddressProvider:   addresses.NewClient(c),
+		AuthProvider:      auth.NewClient(c),
+		CompanyManager:    company.NewClient(c),
+		CustomerManager:   customers.NewClient(c),
+		PosManager:        pos.NewClient(c),
+		ProductManager:    products.NewClient(c),
+		SalesManager:      sales.NewClient(c),
+		WarehouseManager:  warehouse.NewClient(c),
+		ServiceDiscoverer: servicediscovery.NewClient(c),
 	}
-
-	cli := erplyClient{
-		partnerKey: partnerKey,
-		secret:     secret,
-		clientCode: clientCode,
-		url:        fmt.Sprintf(baseURL, clientCode),
-		httpClient: &http.Client{
-			Transport: tr,
-			Timeout:   5 * time.Second,
-		},
-	}
-	return &cli
 }
